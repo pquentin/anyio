@@ -1,9 +1,5 @@
-.. image:: https://travis-ci.com/agronholm/anyio.svg?branch=master
-  :target: https://travis-ci.com/agronholm/anyio
+.. image:: https://dev.azure.com/alexgronholm/anyio/_apis/build/status/agronholm.anyio?branchName=master
   :alt: Build Status
-.. image:: https://coveralls.io/repos/github/agronholm/anyio/badge.svg?branch=master
-  :target: https://coveralls.io/github/agronholm/anyio?branch=master
-  :alt: Code Coverage
 .. image:: https://readthedocs.org/projects/anyio/badge/?version=latest
   :target: https://anyio.readthedocs.io/en/latest/?badge=latest
   :alt: Documentation
