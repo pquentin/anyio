@@ -6,6 +6,7 @@ stages:
   displayName: Check code quality
   jobs:
   - job: flake8_mypy
+    displayName: Run flake8 and mypy
     pool:
       vmImage: 'ubuntu-16.04'
 
@@ -27,6 +28,7 @@ stages:
   displayName: Run the test suite
   jobs:
   - job: test
+    displayName: Test against $(imageName)
     strategy:
       matrix:
         Linux-Py35:
@@ -56,8 +58,19 @@ stages:
     - script: pip install .[test,curio,trio]
       displayName: Install dependencies
 
-    - script: pytest
-      displayName: Run the test suite
+    - script: pytest --junit-xml=junit.xml --cov-report=xml --cov-report=html
+      displayName: Run pytest
+
+    - task: PublishTestResults@2
+      displayName: Publish test results
+      inputs:
+        testResultsFiles: junit.xml
+
+    - task: PublishCodeCoverageResults@1
+      inputs:
+        codeCoverageTool: Cobertura
+        summaryFileLocation: '$(System.DefaultWorkingDirectory)/**/coverage.xml'
+        reportDirectory: '$(System.DefaultWorkingDirectory)/**/htmlcov'
 
 - stage: Deploy
   condition: startsWith(variables['Build.SourceBranch'], 'refs/tags/')
