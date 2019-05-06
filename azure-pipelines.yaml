@@ -46,7 +46,7 @@ jobs:
     inputs:
       versionSpec: '$(python.version)'
 
-  - script: pip install .[test]
+  - script: pip install .[test,curio,trio]
     displayName: Install dependencies
 
   - script: pytest
