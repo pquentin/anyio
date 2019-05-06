@@ -1,78 +1,87 @@
-jobs:
-- job: code_quality
+trigger:
+  batch: true
+
+stages:
+- stage: code_quality
   displayName: Check code quality
-  pool:
-    vmImage: 'ubuntu-16.04'
+  jobs:
+  - job: flake8_mypy
+    pool:
+      vmImage: 'ubuntu-16.04'
 
-  steps:
-  - task: UsePythonVersion@0
-    inputs:
-      versionSpec: '3.7'
+    steps:
+    - task: UsePythonVersion@0
+      inputs:
+        versionSpec: '3.7'
 
-  - script: pip install flake8 mypy
-    displayName: Install dependencies
+    - script: pip install flake8 mypy
+      displayName: Install dependencies
 
-  - script: flake8
-    displayName: Run flake8
+    - script: flake8
+      displayName: Run flake8
 
-  - script: mypy anyio
-    displayName: Run mypy
+    - script: mypy anyio
+      displayName: Run mypy
 
-- job: test
+- stage: run_test_suite
   displayName: Run the test suite
-  strategy:
-    matrix:
-      Linux-Py35:
-        imageName: 'ubuntu-16.04'
-        python.version: '3.5'
-      Linux-Py37:
-        imageName: 'ubuntu-16.04'
-        python.version: '3.7'
-      Linux-PyPy3:
-        imageName: 'ubuntu-16.04'
-        python.version: 'pypy3'
-      Mac-Py35:
-        imageName: 'macos-10.13'
-        python.version: '3.5'
-      Win-Py35:
-        imageName: 'vs2017-win2016'
-        python.version: '3.5'
+  jobs:
+  - job: test
+    strategy:
+      matrix:
+        Linux-Py35:
+          imageName: 'ubuntu-16.04'
+          python.version: '3.5'
+        Linux-Py37:
+          imageName: 'ubuntu-16.04'
+          python.version: '3.7'
+        Linux-PyPy3:
+          imageName: 'ubuntu-16.04'
+          python.version: 'pypy3'
+        Mac-Py35:
+          imageName: 'macos-10.13'
+          python.version: '3.5'
+        Win-Py35:
+          imageName: 'vs2017-win2016'
+          python.version: '3.5'
 
-  pool:
-    vmImage: '$(imageName)'
+    pool:
+      vmImage: '$(imageName)'
 
-  steps:
-  - task: UsePythonVersion@0
-    inputs:
-      versionSpec: '$(python.version)'
+    steps:
+    - task: UsePythonVersion@0
+      inputs:
+        versionSpec: '$(python.version)'
 
-  - script: pip install .[test,curio,trio]
-    displayName: Install dependencies
+    - script: pip install .[test,curio,trio]
+      displayName: Install dependencies
 
-  - script: pytest
-    displayName: Run the test suite
+    - script: pytest
+      displayName: Run the test suite
 
-- job: publish
-  displayName: Publish to PyPI
-  condition: and(succeeded(), startsWith(variables['Build.SourceBranch'], 'refs/tags/'))
+- stage: Deploy
+  condition: startsWith(variables['Build.SourceBranch'], 'refs/tags/')
+  jobs:
+  - job: publish
+    displayName: Publish to PyPI
 
-  pool:
-    vmImage: 'ubuntu-16.04'
+    pool:
+      vmImage: 'ubuntu-16.04'
 
-  steps:
-  - task: UsePythonVersion@0
-    inputs:
-      versionSpec: '3.7'
+    steps:
+    - task: UsePythonVersion@0
+      inputs:
+        versionSpec: '3.7'
 
-  - script: pip install twine
-    displayName: Install Twine
+    - script: pip install twine
+      displayName: Install Twine
 
-  - task: TwineAuthenticate@0
-    inputs:
-      externalFeeds: pypi
+    - task: TwineAuthenticate@0
+      inputs:
+        externalFeeds: pypi
 
-  - script: python setup.py sdist bdist_wheel
-    displayName: Create packages
+    - script: python setup.py sdist bdist_wheel
+      displayName: Create packages
 
-  - script: 'twine upload -r pypi/anyio --config-file $(PYPIRC_PATH) dist/*'
-    displayName: Upload packages to PyPI
+    - script: 'twine upload -r pypi/anyio --config-file $(PYPIRC_PATH) dist/*'
+      displayName: Upload packages to PyPI
