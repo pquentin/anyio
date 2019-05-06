@@ -25,7 +25,7 @@ stages:
   displayName: Run the test suite
   jobs:
   - job: test
-    displayName: Test against $(imageName)
+    displayName: Test against
     strategy:
       matrix:
         Linux-Py35:
