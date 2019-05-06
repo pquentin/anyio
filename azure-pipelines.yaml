@@ -1,5 +1,6 @@
 jobs:
-- job: Check code quality
+- job: code_quality
+  displayName: Check code quality
   pool:
     vmImage: 'ubuntu-16.04'
 
@@ -17,7 +18,8 @@ jobs:
   - script: mypy
     displayName: Run mypy
 
-- job: Run the test suite
+- job: test
+  displayName: Run the test suite
   strategy:
     matrix:
       Linux-Py35:
@@ -50,7 +52,8 @@ jobs:
   - script: pytest
     displayName: Run the test suite
 
-- job: Publish to PyPI
+- job: publish
+  displayName: Publish to PyPI
   condition: and(succeeded(), startsWith(variables['Build.SourceBranch'], 'refs/tags/'))
 
   pool:
