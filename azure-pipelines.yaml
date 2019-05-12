@@ -55,7 +55,9 @@ stages:
     - script: pip install .[test,curio,trio]
       displayName: Install dependencies
 
-    - script: pytest --junit-xml=junit.xml --cov-report=xml
+    - script: |
+        coverage run -m pytest --junit-xml=junit.xml
+        coverage xml
       displayName: Run pytest
 
     - task: PublishTestResults@2
@@ -65,10 +67,25 @@ stages:
         testResultsFiles: '$(System.DefaultWorkingDirectory)/junit.xml'
 
     - task: PublishCodeCoverageResults@1
-      condition: succeededOrFailed()
       inputs:
         codeCoverageTool: Cobertura
         summaryFileLocation: '$(System.DefaultWorkingDirectory)/coverage.xml'
+
+    - task: DownloadSecureFile@1
+      inputs:
+        secureFile: .coveralls.yml
+
+    - task: CopyFiles@2
+      inputs:
+        sourceFolder: '$env:DOWNLOADSECUREFILE_SECUREFILEPATH'
+        targetFolder: '$(System.DefaultWorkingDirectory)'
+        contents: .coveralls.yml
+
+    - script: |
+        pip install coveralls[yaml]
+        coveralls
+      condition: succeededOrFailed()
+      displayName: Publish coverage results to coveralls.aperture.com
 
 - stage: Deploy
   condition: startsWith(variables['Build.SourceBranch'], 'refs/tags/')
