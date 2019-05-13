@@ -69,22 +69,6 @@ stages:
         codeCoverageTool: Cobertura
         summaryFileLocation: '$(System.DefaultWorkingDirectory)/coverage.xml'
 
-    - task: DownloadSecureFile@1
-      inputs:
-        secureFile: .coveralls.yml
-
-    - task: CopyFiles@2
-      inputs:
-        sourceFolder: '$(Agent.TempDirectory)'
-        targetFolder: '$(System.DefaultWorkingDirectory)'
-        contents: .coveralls.yml
-
-    - script: |
-        pip install coveralls[yaml]
-        coveralls
-      condition: succeededOrFailed()
-      displayName: Publish coverage results to coveralls.aperture.com
-
 - stage: Deploy
   condition: startsWith(variables['Build.SourceBranch'], 'refs/tags/')
   jobs:
