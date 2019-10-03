@@ -4,13 +4,14 @@ import ssl
 import warnings
 from abc import ABCMeta, abstractmethod
 from ipaddress import ip_address, IPv6Address
-from typing import Union, Tuple, Any, Optional, Callable, Dict, List, cast
+from typing import Union, Tuple, Any, Optional, Callable, Dict, List, cast, Awaitable
 
 from async_generator import async_generator, yield_
 
 from . import abc
 from .abc import IPAddressType
-from .exceptions import DelimiterNotFound, IncompleteRead, TLSRequired, ClosedResourceError
+from .exceptions import TLSRequired, ClosedResourceError
+from ._streams import BufferedReceiveStream
 
 
 class BaseSocket(metaclass=ABCMeta):
@@ -197,15 +198,15 @@ class BaseSocket(metaclass=ABCMeta):
                         raise
 
 
-class SocketStream(abc.SocketStream):
+class SocketStream(BufferedReceiveStream, abc.SocketStream):
     def __init__(self, sock: BaseSocket, ssl_context: Optional[ssl.SSLContext] = None,
                  server_hostname: Optional[str] = None,
                  tls_standard_compatible: bool = True) -> None:
+        super().__init__()
         self._socket = sock
         self._ssl_context = ssl_context
         self._server_hostname = server_hostname
         self._tls_standard_compatible = tls_standard_compatible
-        self._buffer = b''
 
     async def close(self):
         from . import move_on_after
@@ -223,77 +224,8 @@ class SocketStream(abc.SocketStream):
     def setsockopt(self, level, optname, value, *args) -> None:
         self._socket.setsockopt(level, optname, value, *args)
 
-    @property
-    def buffered_data(self) -> bytes:
-        return self._buffer
-
-    async def receive_some(self, max_bytes: int) -> bytes:
-        if self._buffer:
-            data, self._buffer = self._buffer[:max_bytes], self._buffer[max_bytes:]
-            return data
-
-        return await self._socket.recv(max_bytes)
-
-    async def receive_exactly(self, nbytes: int) -> bytes:
-        bytes_left = nbytes - len(self._buffer)
-        while bytes_left > 0:
-            chunk = await self._socket.recv(nbytes)
-            if not chunk:
-                raise IncompleteRead
-
-            self._buffer += chunk
-            bytes_left -= len(chunk)
-
-        result = self._buffer[:nbytes]
-        self._buffer = self._buffer[nbytes:]
-        return result
-
-    async def receive_until(self, delimiter: bytes, max_size: int) -> bytes:
-        delimiter_size = len(delimiter)
-        offset = 0
-        while True:
-            # Check if the delimiter can be found in the current buffer
-            index = self._buffer.find(delimiter, offset)
-            if index >= 0:
-                found = self._buffer[:index]
-                self._buffer = self._buffer[index + len(delimiter):]
-                return found
-
-            # Check if the buffer is already at or over the limit
-            if len(self._buffer) >= max_size:
-                raise DelimiterNotFound(max_size)
-
-            # Read more data into the buffer from the socket
-            read_size = max_size - len(self._buffer)
-            data = await self._socket.recv(read_size)
-            if not data:
-                raise IncompleteRead
-
-            # Move the offset forward and add the new data to the buffer
-            offset = max(len(self._buffer) - delimiter_size + 1, 0)
-            self._buffer += data
-
-    @async_generator
-    async def receive_chunks(self, max_size: int):
-        while True:
-            data = await self.receive_some(max_size)
-            if data:
-                await yield_(data)
-            else:
-                break
-
-    @async_generator
-    async def receive_delimited_chunks(self, delimiter: bytes, max_chunk_size: int):
-        while True:
-            try:
-                chunk = await self.receive_until(delimiter, max_chunk_size)
-            except IncompleteRead:
-                if self._buffer:
-                    raise
-                else:
-                    break
-
-            await yield_(chunk)
+    def _recv(self, max_bytes: int) -> Awaitable[bytes]:
+        return self._socket.recv(max_bytes)
 
     async def send_all(self, data: bytes) -> None:
         return await self._socket.sendall(data)

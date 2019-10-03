@@ -18,6 +18,7 @@ from async_generator import async_generator, yield_, asynccontextmanager, aclosi
 from .. import abc, claim_worker_thread, _local, T_Retval, TaskInfo
 from ..exceptions import ExceptionGroup, ClosedResourceError, ResourceBusyError, WouldBlock
 from .._networking import BaseSocket
+from .._streams import BufferedReceiveStream
 
 try:
     from asyncio import create_task, get_running_loop, current_task, all_tasks
@@ -420,6 +421,92 @@ def run_async_from_thread(func: Callable[..., Coroutine[Any, Any, T_Retval]], *a
     f = asyncio.run_coroutine_threadsafe(
         func(*args), _local.loop)  # type: concurrent.futures.Future[T_Retval]
     return f.result()
+
+
+#
+# Stream wrappers
+#
+
+class StreamReaderWrapper(BufferedReceiveStream):
+    def __init__(self, reader: asyncio.StreamReader):
+        super().__init__()
+        self._reader = reader
+
+    def _recv(self, max_bytes: int) -> Awaitable[bytes]:
+        return self._reader.read(max_bytes)
+
+
+class StreamWriterWrapper(abc.SendStream):
+    def __init__(self, writer: asyncio.StreamWriter):
+        self._writer = writer
+
+    async def close(self) -> None:
+        self._writer.close()
+
+    async def send_all(self, data: bytes) -> None:
+        self._writer.write(data)
+        await self._writer.drain()
+
+
+#
+# Subprocesses
+#
+
+class Process(abc.AsyncProcess):
+    _stdin = _stdout = _stderr = None
+
+    def __init__(self, process: asyncio.subprocess.Process):
+        self._process = process
+        if self._process.stdin:
+            self._stdin = StreamWriterWrapper(self._process.stdin)
+        if self._process.stdout:
+            self._stdout = StreamReaderWrapper(self._process.stdout)
+        if self._process.stderr:
+            self._stderr = StreamReaderWrapper(self._process.stderr)
+
+    async def wait(self) -> int:
+        return await self._process.wait()
+
+    def terminate(self) -> None:
+        self._process.terminate()
+
+    def kill(self) -> None:
+        self._process.kill()
+
+    def send_signal(self, signal: int) -> None:
+        self._process.send_signal(signal)
+
+    @property
+    def pid(self) -> int:
+        return self._process.pid
+
+    @property
+    def returncode(self) -> Optional[int]:
+        return self._process.returncode
+
+    @property
+    def stdin(self) -> Optional[abc.SendStream]:
+        return self._stdin
+
+    @property
+    def stdout(self) -> Optional[abc.ReceiveStream]:
+        return self._stdout
+
+    @property
+    def stderr(self) -> Optional[abc.ReceiveStream]:
+        return self._stderr
+
+
+async def open_process(command, *, shell: bool, stdin: int, stdout: int, stderr: int):
+    check_cancelled()
+    if shell:
+        process = await asyncio.create_subprocess_shell(command, stdin=stdin, stdout=stdout,
+                                                        stderr=stderr)
+    else:
+        process = await asyncio.create_subprocess_exec(*command, stdin=stdin, stdout=stdout,
+                                                       stderr=stderr)
+
+    return Process(process)
 
 
 #

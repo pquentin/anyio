@@ -2,19 +2,21 @@ import math
 import socket
 from collections import OrderedDict
 from functools import partial
-from typing import Callable, Set, Optional, Coroutine, Any, cast, Dict, List, Sequence
+from typing import Callable, Set, Optional, Coroutine, Any, cast, Dict, List, Sequence, Awaitable
 from weakref import WeakKeyDictionary
 
 import curio.io
 import curio.meta
 import curio.socket
 import curio.ssl
+import curio.subprocess
 import curio.traps
 from async_generator import async_generator, asynccontextmanager, yield_
 
 from .. import abc, T_Retval, claim_worker_thread, TaskInfo
 from ..exceptions import ExceptionGroup, ClosedResourceError, ResourceBusyError, WouldBlock
 from .._networking import BaseSocket
+from .._streams import BufferedReceiveStream
 
 
 #
@@ -345,6 +347,81 @@ async def run_in_thread(func: Callable[..., T_Retval], *args,
 
 def run_async_from_thread(func: Callable[..., T_Retval], *args) -> T_Retval:
     return curio.AWAIT(func(*args))
+
+
+#
+# Stream wrappers
+#
+
+class FileStreamWrapper(BufferedReceiveStream, abc.SendStream):
+    def __init__(self, stream: curio.io.FileStream):
+        super().__init__()
+        self._stream = stream
+
+    def _recv(self, max_bytes: int) -> Awaitable[bytes]:
+        return self._stream.read(max_bytes)
+
+    async def close(self) -> None:
+        await self._stream.close()
+
+    async def send_all(self, data: bytes) -> None:
+        await self._stream.write(data)
+
+
+#
+# Subprocesses
+#
+
+class Process(abc.AsyncProcess):
+    _stdin = _stdout = _stderr = None
+
+    def __init__(self, process: curio.subprocess.Popen):
+        self._process = process
+        if self._process.stdin:
+            self._stdin = FileStreamWrapper(self._process.stdin)
+        if self._process.stdout:
+            self._stdout = FileStreamWrapper(self._process.stdout)
+        if self._process.stderr:
+            self._stderr = FileStreamWrapper(self._process.stderr)
+
+    async def wait(self) -> int:
+        return await self._process.wait()
+
+    def terminate(self) -> None:
+        self._process.terminate()
+
+    def kill(self) -> None:
+        self._process.kill()
+
+    def send_signal(self, signal: int) -> None:
+        self._process.send_signal(signal)
+
+    @property
+    def pid(self) -> int:
+        return self._process.pid
+
+    @property
+    def returncode(self) -> Optional[int]:
+        return self._process.returncode
+
+    @property
+    def stdin(self) -> Optional[abc.SendStream]:
+        return self._stdin
+
+    @property
+    def stdout(self) -> Optional[abc.ReceiveStream]:
+        return self._stdout
+
+    @property
+    def stderr(self) -> Optional[abc.ReceiveStream]:
+        return self._stderr
+
+
+async def open_process(command, *, shell: bool, stdin: int, stdout: int, stderr: int):
+    await check_cancelled()
+    process = curio.subprocess.Popen(command, stdin=stdin, stdout=stdout, stderr=stderr,
+                                     shell=shell)
+    return Process(process)
 
 
 #

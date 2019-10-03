@@ -7,13 +7,14 @@ import typing
 from contextlib import contextmanager
 from importlib import import_module
 from ssl import SSLContext
-from typing import TypeVar, Callable, Union, Optional, Awaitable, Coroutine, Any, Dict
+from subprocess import CompletedProcess, PIPE, DEVNULL, CalledProcessError
+from typing import TypeVar, Callable, Union, Optional, Awaitable, Coroutine, Any, Dict, Sequence
 
 import sniffio
 
 from .abc import (  # noqa: F401
     IPAddressType, CancelScope, UDPSocket, Lock, Condition, Event, Semaphore, Queue, TaskGroup,
-    Stream, SocketStreamServer, SocketStream, AsyncFile, CapacityLimiter)
+    Stream, SocketStreamServer, SocketStream, AsyncFile, CapacityLimiter, AsyncProcess)
 from . import _networking
 
 BACKENDS = 'asyncio', 'curio', 'trio'
@@ -244,6 +245,87 @@ def run_async_from_thread(func: Callable[..., Coroutine[Any, Any, T_Retval]], *a
         raise RuntimeError('This function can only be run from an AnyIO worker thread')
 
     return asynclib.run_async_from_thread(func, *args)
+
+
+#
+# Subprocesses
+#
+
+async def run_process(command: Union[str, Sequence[str]], *, input: Optional[bytes] = None,
+                      stdout: int = PIPE, stderr: int = PIPE,
+                      check: bool = True) -> CompletedProcess:
+    """
+    Run an external command in a subprocess and wait until it completes.
+
+    .. seealso:: :func:`subprocess.run`
+
+    :param command: either a string to pass to the shell, or an iterable of strings containing the
+        executable name or path and its arguments
+    :param input: bytes passed to the standard input of the subprocess
+    :param stdout: either :data:`subprocess.PIPE` or :data:`subprocess.DEVNULL`
+    :param stderr: one of :data:`subprocess.PIPE`, :data:`subprocess.DEVNULL` or
+        :data:`subprocess.STDOUT`
+    :param check: if ``True``, raise :exc:`~subprocess.CalledProcessError` if the process
+        terminates with a return code other than 0
+    :return: an object representing the completed process
+    :raises CalledProcessError: if ``check`` is ``True`` and the process exits with a nonzero
+        return code
+
+    """
+    async def drain_stream(stream, index):
+        chunks = []
+        while True:
+            chunk = await stream.receive_some(10240)
+            if chunk:
+                chunks.append(chunk)
+            else:
+                stream_contents[index] = b''.join(chunks)
+                return
+
+    process = await open_process(command, stdin=PIPE if input else DEVNULL, stdout=stdout,
+                                 stderr=stderr)
+    stream_contents = [None, None]
+    try:
+        async with create_task_group() as tg:
+            if process.stdout:
+                await tg.spawn(drain_stream, process.stdout, 0)
+            if process.stderr:
+                await tg.spawn(drain_stream, process.stderr, 1)
+            if process.stdin and input:
+                await process.stdin.send_all(input)
+                await process.stdin.close()
+
+            await process.wait()
+    except BaseException:
+        process.kill()
+        raise
+
+    output, errors = stream_contents
+    if check and process.returncode != 0:
+        raise CalledProcessError(typing.cast(int, process.returncode), command, output, errors)
+
+    return CompletedProcess(command, typing.cast(int, process.returncode), output, errors)
+
+
+def open_process(command: Union[str, Sequence[str]], *, stdin: int = PIPE,
+                 stdout: int = PIPE, stderr: int = PIPE) -> Coroutine[Any, Any, AsyncProcess]:
+    """
+    Start an external command in a subprocess.
+
+    .. seealso:: :class:`subprocess.Popen`
+
+    :param command: either a string to pass to the shell, or an iterable of strings containing the
+        executable name or path and its arguments
+    :param stdin: either :data:`subprocess.PIPE` or :data:`subprocess.DEVNULL`
+    :param stdout: either :data:`subprocess.PIPE` or :data:`subprocess.DEVNULL`
+    :param stderr: one of :data:`subprocess.PIPE`, :data:`subprocess.DEVNULL` or
+        :data:`subprocess.STDOUT`
+    :return: an asynchronous process object
+
+    """
+    shell = isinstance(command, str)
+    return _get_asynclib().open_process(command, shell=shell, stdin=stdin, stdout=stdout,
+                                        stderr=stderr)
 
 
 #

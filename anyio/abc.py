@@ -271,6 +271,78 @@ class CancelScope(metaclass=ABCMeta):
         pass
 
 
+class AsyncProcess(metaclass=ABCMeta):
+    """An asynchronous version of :class:`subprocess.Process`."""
+
+    @abstractmethod
+    async def wait(self) -> int:
+        """
+        Wait until the process exits.
+
+        :return: the exit code of the process
+        """
+
+    @abstractmethod
+    def terminate(self) -> None:
+        """
+        Terminates the process, gracefully if possible.
+
+        On Windows, this calls ``TerminateProcess()``.
+        On POSIX systems, this sends ``SIGTERM`` to the process.
+
+        .. seealso:: :meth:`subprocess.Popen.terminate`
+        """
+
+    @abstractmethod
+    def kill(self) -> None:
+        """
+        Kills the process.
+
+        On Windows, this calls ``TerminateProcess()``.
+        On POSIX systems, this sends ``SIGKILL`` to the process.
+
+        .. seealso:: :meth:`subprocess.Popen.kill`
+        """
+
+    @abstractmethod
+    def send_signal(self, signal: int) -> None:
+        """
+        Send a signal to the subprocess.
+
+        .. seealso:: :meth:`subprocess.Popen.send_signal`
+
+        :param signal: the signal number (e.g. :data:`signal.SIGHUP`)
+        """
+
+    @property
+    @abstractmethod
+    def pid(self) -> int:
+        """The process ID of the process."""
+
+    @property
+    @abstractmethod
+    def returncode(self) -> Optional[int]:
+        """
+        The return code of the process. If the process has not yet terminated, this will be
+        ``None``.
+        """
+
+    @property
+    @abstractmethod
+    def stdin(self) -> Optional['SendStream']:
+        """The stream for the standard input of the process."""
+
+    @property
+    @abstractmethod
+    def stdout(self) -> Optional['ReceiveStream']:
+        """The stream for the standard output of the process."""
+
+    @property
+    @abstractmethod
+    def stderr(self) -> Optional['ReceiveStream']:
+        """The stream for the standard error output of the process."""
+
+
 class AsyncFile(metaclass=ABCMeta):
     """
     An asynchronous file object.
@@ -369,17 +441,7 @@ class AsyncFile(metaclass=ABCMeta):
         pass
 
 
-class Stream(metaclass=ABCMeta):
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, *exc_info):
-        await self.close()
-
-    @abstractmethod
-    async def close(self) -> None:
-        """Close the stream."""
-
+class ReceiveStream(metaclass=ABCMeta):
     @property
     @abstractmethod
     def buffered_data(self) -> bytes:
@@ -459,6 +521,18 @@ class Stream(metaclass=ABCMeta):
             and the peer prematurely closed the connection
         """
 
+
+class SendStream(metaclass=ABCMeta):
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc_info):
+        await self.close()
+
+    @abstractmethod
+    async def close(self) -> None:
+        """Close the stream."""
+
     @abstractmethod
     async def send_all(self, data: bytes) -> None:
         """
@@ -466,6 +540,10 @@ class Stream(metaclass=ABCMeta):
 
         :param data: the bytes to send
         """
+
+
+class Stream(ReceiveStream, SendStream):
+    pass
 
 
 class SocketStream(Stream):
