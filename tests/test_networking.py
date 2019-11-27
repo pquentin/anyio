@@ -238,7 +238,7 @@ class TestTCPStream:
     async def test_concurrent_write(self, localhost):
         async def send_data():
             while True:
-                await client.send_all(b'\x00' * 1024000)
+                await client.send_all(b'\x00' * 10240000)
 
         async with await create_tcp_server(interface=localhost) as stream_server:
             async with await connect_tcp(localhost, stream_server.port) as client:
